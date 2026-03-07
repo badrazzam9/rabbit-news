@@ -2,7 +2,7 @@
    R1 News Fetcher v26 — main.js
    ═══════════════════════════════════════════════ */
 
-const APP_VERSION = '82';
+const APP_VERSION = '83';
 const API_BASE = (localStorage.getItem('r1_api_base') || 'https://rabbit-news-worker.swordandscroll.workers.dev').replace(/\/$/, '');
 const BREAKING_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -1076,9 +1076,12 @@ function createCardElement(card, index, {
 } = {}) {
   const normalizedCard = normalizeCard(card);
   const article = document.createElement('article');
-  article.className = 'news-card animate-in';
-  article.style.animationDelay = `${index * 50}ms`;
+  article.className = 'news-card';
   article.dataset.index = String(index);
+
+  const shell = document.createElement('div');
+  shell.className = 'news-card-shell news-card-shell--intro';
+  shell.style.animationDelay = `${index * 40}ms`;
 
   if (normalizedCard.image?.url) {
     const img = document.createElement('img');
@@ -1093,14 +1096,14 @@ function createCardElement(card, index, {
       const ph = document.createElement('div');
       ph.className = 'news-card-image news-card-image--placeholder';
       ph.textContent = placeholderLabel;
-      article.prepend(ph);
+      shell.prepend(ph);
     };
-    article.appendChild(img);
+    shell.appendChild(img);
   } else {
     const ph = document.createElement('div');
     ph.className = 'news-card-image news-card-image--placeholder';
     ph.textContent = placeholderLabel;
-    article.appendChild(ph);
+    shell.appendChild(ph);
   }
 
   const content = document.createElement('div');
@@ -1134,7 +1137,8 @@ function createCardElement(card, index, {
     content.appendChild(loadMore);
   }
 
-  article.appendChild(content);
+  shell.appendChild(content);
+  article.appendChild(shell);
 
   const openCard = () => {
     const articleUrl = normalizedCard.url || normalizedCard.link;
