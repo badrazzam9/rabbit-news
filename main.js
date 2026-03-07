@@ -2,7 +2,7 @@
    R1 News Fetcher v26 — main.js
    ═══════════════════════════════════════════════ */
 
-const APP_VERSION = '84';
+const APP_VERSION = '85';
 const API_BASE = (localStorage.getItem('r1_api_base') || 'https://rabbit-news-worker.swordandscroll.workers.dev').replace(/\/$/, '');
 const BREAKING_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -894,7 +894,7 @@ function createCardMetaElement(card) {
 
 /* ═══ Breaking news as 3D wheel ═══ */
 function createBreakingCardElement(card, index) {
-  return createCardElement(card, index, { placeholderLabel: 'Breaking', includeSummary: true });
+  return createCardElement(card, index, { placeholderLabel: 'Breaking' });
 }
 
 function applyWheelTransformsToNodes(cards, activePosition, { updateLoadMore = false, counterId = null } = {}) {
@@ -1065,8 +1065,7 @@ function bindCardOpen(element, handler) {
 function createCardElement(card, index, {
   shouldShowLoadMore = false,
   nextBatchCount = 0,
-  placeholderLabel = 'Top Story',
-  includeSummary = true
+  placeholderLabel = 'Top Story'
 } = {}) {
   const normalizedCard = normalizeCard(card);
   const article = document.createElement('article');
@@ -1108,12 +1107,6 @@ function createCardElement(card, index, {
   title.textContent = normalizedCard.title || `Story ${index + 1}`;
 
   content.append(meta, title);
-
-  if (includeSummary) {
-    const snippet = document.createElement('p');
-    snippet.textContent = normalizedCard.summary || 'Tap to open full story.';
-    content.appendChild(snippet);
-  }
 
   if (shouldShowLoadMore) {
     const loadMore = document.createElement('div');
