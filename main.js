@@ -358,6 +358,49 @@ function getHostFromUrl(url) {
   }
 }
 
+function upgradeImageUrl(url, host = '') {
+  if (!url) return '';
+
+  try {
+    const parsed = new URL(url);
+
+    if (/ichef\.bbci\.co\.uk$/i.test(parsed.hostname)) {
+      parsed.pathname = parsed.pathname.replace(/\/news\/\d+\//i, '/news/1024/');
+      return parsed.toString();
+    }
+
+    ['w', 'width'].forEach((key) => {
+      const value = Number(parsed.searchParams.get(key) || 0);
+      if (value && value < 1200) parsed.searchParams.set(key, '1200');
+    });
+    ['h', 'height'].forEach((key) => {
+      const value = Number(parsed.searchParams.get(key) || 0);
+      if (value && value < 900) parsed.searchParams.set(key, '900');
+    });
+    if (parsed.searchParams.has('quality')) {
+      parsed.searchParams.set('quality', '90');
+    }
+    if (parsed.searchParams.has('q')) {
+      const value = Number(parsed.searchParams.get('q') || 0);
+      if (value && value < 90) parsed.searchParams.set('q', '90');
+    }
+
+    let upgraded = parsed.toString()
+      .replace(/([?&](?:w|width)=)(\d{2,4})/gi, (_, prefix) => `${prefix}1200`)
+      .replace(/([?&](?:h|height)=)(\d{2,4})/gi, (_, prefix) => `${prefix}900`)
+      .replace(/([?&](?:quality|q)=)(\d{1,3})/gi, (_, prefix) => `${prefix}90`)
+      .replace(/\/(?:square|thumbnail|thumb|small|tiny)[/_-]/gi, '/large/');
+
+    if (/reuters\.com$/i.test(host || parsed.hostname)) {
+      upgraded = upgraded.replace(/\/\d+\?/, '/1200?');
+    }
+
+    return upgraded;
+  } catch {
+    return url;
+  }
+}
+
 function getSourcePenalty(host) {
   const health = state.sourceHealth[host] || { clean: 0, sourceOnly: 0, failed: 0 };
   const learnedPenalty = Math.max(0, (health.sourceOnly * 0.9) + (health.failed * 1.2) - (health.clean * 0.45));
@@ -400,6 +443,10 @@ function normalizeCard(card = {}) {
   const split = splitHeadlineAndSource(decodedTitle, sourceOverride);
   const summary = decodeHtmlEntities(String(card.snippet || card.summary || '')).replace(/\s+/g, ' ').trim();
   const host = getHostFromUrl(url);
+  const cardImage = card.image?.url ? {
+    ...card.image,
+    url: upgradeImageUrl(card.image.url, host)
+  } : null;
   return {
     ...card,
     id: getCardId(card),
@@ -411,6 +458,7 @@ function normalizeCard(card = {}) {
     publishedTs,
     ageLabel: formatAge(publishedTs),
     summary,
+    image: cardImage,
     isNew: !state.seenArticleIds.has(getCardId(card))
   };
 }
@@ -806,7 +854,7 @@ function applyWheelTransformsToNodes(cards, active, { updateLoadMore = false, co
     const z = (Math.cos(angle * Math.PI / 180) - 1) * radius;
     const scale = Math.max(WHEEL_CONFIG.minScale, Math.cos(angle * Math.PI / 180));
     const opacity = Math.max(0, Math.cos(angle * Math.PI / 180) * 1.1 - 0.1);
-    const blur = Math.min(2.8, absOff * 1.1);
+    const blur = Math.min(0.65, absOff * 0.22);
 
     card.style.cssText = `
       display: block;
