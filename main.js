@@ -2,7 +2,7 @@
    R1 News Fetcher v26 — main.js
    ═══════════════════════════════════════════════ */
 
-const APP_VERSION = '75';
+const APP_VERSION = '76';
 const API_BASE = (localStorage.getItem('r1_api_base') || 'https://rabbit-news-worker.swordandscroll.workers.dev').replace(/\/$/, '');
 const BREAKING_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -20,11 +20,13 @@ const SOURCE_HEALTH_KEY = 'r1_source_health_v1';
 const SUPERSEDED_REQUEST_MESSAGE = 'Request replaced by a newer action.';
 const CARD_BATCH_SIZE = 20;
 const TAP_OPEN_MAX_DELTA = 12;
+const WHEEL_ANIMATION_EASE = 0.22;
+const WHEEL_ANIMATION_EPSILON = 0.003;
 const WHEEL_CONFIG = {
-  maxVisibleOffset: 2,
-  angleStep: 56,
-  radius: 108,
-  minScale: 0.44
+  maxVisibleOffset: 2.8,
+  angleStep: 50,
+  radius: 110,
+  minScale: 0.42
 };
 const LIVE_COVERAGE_TITLE_RE = /\b(live updates?|what to know|as it happened|live blog|minute by minute|watch live)\b/i;
 const LIVE_COVERAGE_URL_RE = /\/(?:live|live-updates?|blogs?)\/|\/live-updates(?:[-/]|$)|[?&]page=live\b/i;
@@ -229,6 +231,9 @@ const state = {
   regionsExpanded: false,
   breakingCards: [],
   breakingIndex: 0,
+  breakingWheelPosition: 0,
+  breakingWheelTarget: 0,
+  breakingWheelFrame: 0,
   requestControllers: new Map(),
   currentFeedContext: null,
   deckTouchStartY: 0,
@@ -236,6 +241,9 @@ const state = {
   breakingRequestId: 0,
   cardsRequestId: 0,
   lastBreakingRefreshAt: 0,
+  cardWheelPosition: 0,
+  cardWheelTarget: 0,
+  cardWheelFrame: 0,
   loadedCardCount: 0,
   seenArticleIds: new Set(),
   sourceHealth: {},
@@ -755,13 +763,41 @@ function goBackView() {
   if (state.view === 'cards') return setView('home');
 }
 
+function animateWheel(positionKey, targetKey, frameKey, render) {
+  if (state[frameKey]) {
+    return;
+  }
+
+  const step = () => {
+    const current = Number(state[positionKey]) || 0;
+    const target = Number(state[targetKey]) || 0;
+    const delta = target - current;
+
+    if (Math.abs(delta) <= WHEEL_ANIMATION_EPSILON) {
+      state[positionKey] = target;
+      state[frameKey] = 0;
+      render();
+      return;
+    }
+
+    state[positionKey] = current + (delta * WHEEL_ANIMATION_EASE);
+    render();
+    state[frameKey] = requestAnimationFrame(step);
+  };
+
+  state[frameKey] = requestAnimationFrame(step);
+}
+
 function scrollCards(direction) {
   if (!state.cards.length) return;
   if (direction > 0 && state.activeCardIndex >= state.loadedCardCount - 1 && state.loadedCardCount < state.cards.length) {
     appendNextCardBatch();
   }
-  state.activeCardIndex = Math.max(0, Math.min(state.loadedCardCount - 1, state.activeCardIndex + direction));
-  applyWheelTransforms();
+  const nextIndex = Math.max(0, Math.min(state.loadedCardCount - 1, state.activeCardIndex + direction));
+  if (nextIndex === state.activeCardIndex && state.cardWheelTarget === nextIndex) return;
+  state.activeCardIndex = nextIndex;
+  state.cardWheelTarget = nextIndex;
+  animateWheel('cardWheelPosition', 'cardWheelTarget', 'cardWheelFrame', applyWheelTransforms);
 }
 
 function goHomeView() {
@@ -837,12 +873,15 @@ function createBreakingCardElement(card, index) {
   return createCardElement(card, index, { placeholderLabel: 'Breaking', includeSummary: true });
 }
 
-function applyWheelTransformsToNodes(cards, active, { updateLoadMore = false, counterId = null } = {}) {
+function applyWheelTransformsToNodes(cards, activePosition, { updateLoadMore = false, counterId = null, activeIndex = null } = {}) {
   if (!cards.length) return;
   if (updateLoadMore) updateLoadMoreHint();
 
+  const focusedIndex = Math.max(0, Math.min(cards.length - 1, Math.round(activePosition)));
+  const counterIndex = activeIndex ?? focusedIndex;
+
   cards.forEach((card, i) => {
-    const offset = i - active;
+    const offset = i - activePosition;
     const absOff = Math.abs(offset);
 
     if (absOff > WHEEL_CONFIG.maxVisibleOffset) {
@@ -865,17 +904,17 @@ function applyWheelTransformsToNodes(cards, active, { updateLoadMore = false, co
       display: block;
       transform: translateY(${y.toFixed(2)}px) translateZ(${z.toFixed(2)}px) rotateX(${(-angle).toFixed(2)}deg) scale(${scale.toFixed(3)});
       opacity: ${opacity.toFixed(3)};
-      z-index: ${10 - absOff};
-      pointer-events: ${absOff === 0 ? 'auto' : 'none'};
+      z-index: ${Math.round(100 - (absOff * 10))};
+      pointer-events: ${i === focusedIndex ? 'auto' : 'none'};
       filter: blur(${blur.toFixed(2)}px);
       box-shadow: 0 ${10 + (absOff * 3)}px ${30 + (absOff * 4)}px rgba(0, 0, 0, ${shadowAlpha.toFixed(3)});
     `;
-    card.classList.toggle('is-active', i === active);
+    card.classList.toggle('is-active', i === focusedIndex);
   });
 
   if (counterId) {
     const counter = document.getElementById(counterId);
-    if (counter) counter.textContent = `${active + 1} / ${cards.length}`;
+    if (counter) counter.textContent = `${counterIndex + 1} / ${cards.length}`;
   }
 }
 
@@ -883,13 +922,19 @@ function applyBreakingWheelTransforms() {
   const cards = [...els.breakingDeck.querySelectorAll('.news-card')];
   if (!cards.length) return;
 
-  applyWheelTransformsToNodes(cards, state.breakingIndex, { counterId: 'breakCounter' });
+  applyWheelTransformsToNodes(cards, state.breakingWheelPosition, {
+    counterId: 'breakCounter',
+    activeIndex: state.breakingIndex
+  });
 }
 
 function scrollBreaking(direction) {
   if (!state.breakingCards.length) return;
-  state.breakingIndex = Math.max(0, Math.min(state.breakingCards.length - 1, state.breakingIndex + direction));
-  applyBreakingWheelTransforms();
+  const nextIndex = Math.max(0, Math.min(state.breakingCards.length - 1, state.breakingIndex + direction));
+  if (nextIndex === state.breakingIndex && state.breakingWheelTarget === nextIndex) return;
+  state.breakingIndex = nextIndex;
+  state.breakingWheelTarget = nextIndex;
+  animateWheel('breakingWheelPosition', 'breakingWheelTarget', 'breakingWheelFrame', applyBreakingWheelTransforms);
 }
 
 async function loadBreakingNewsInline() {
@@ -924,6 +969,12 @@ async function loadBreakingNewsInline() {
     state.breakingCards = uniqueCards;
     els.breakingDeck.innerHTML = '';
     state.breakingIndex = 0;
+    state.breakingWheelPosition = 0;
+    state.breakingWheelTarget = 0;
+    if (state.breakingWheelFrame) {
+      cancelAnimationFrame(state.breakingWheelFrame);
+      state.breakingWheelFrame = 0;
+    }
     state.lastBreakingRefreshAt = Date.now();
     state.breakingCards.forEach((card, index) => {
       els.breakingDeck.appendChild(createBreakingCardElement(card, index));
@@ -1065,7 +1116,10 @@ function createCardElement(card, index, {
 function applyWheelTransforms() {
   const cards = [...els.deck.querySelectorAll('.news-card')];
   if (!cards.length) return;
-  applyWheelTransformsToNodes(cards, state.activeCardIndex, { updateLoadMore: true });
+  applyWheelTransformsToNodes(cards, state.cardWheelPosition, {
+    updateLoadMore: true,
+    activeIndex: state.activeCardIndex
+  });
 
   // Card counter
   els.cardCounter.textContent = `${state.activeCardIndex + 1} / ${state.cards.length}`;
@@ -1079,6 +1133,12 @@ function refreshActiveCard() {
 function renderCards(cards = [], sourceLabel = 'News') {
   state.cards = cards.map(normalizeCard);
   state.activeCardIndex = 0;
+  state.cardWheelPosition = 0;
+  state.cardWheelTarget = 0;
+  if (state.cardWheelFrame) {
+    cancelAnimationFrame(state.cardWheelFrame);
+    state.cardWheelFrame = 0;
+  }
   state.loadedCardCount = 0;
   els.deck.innerHTML = '';
 
