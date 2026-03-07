@@ -336,8 +336,8 @@ input {
   position: relative;
   height: 196px;
   margin: .7rem .1rem .1rem;
-  perspective: 430px;
-  perspective-origin: center center;
+  perspective: 320px;
+  perspective-origin: center 42%;
   transform-style: preserve-3d;
 }
 
@@ -395,9 +395,10 @@ input {
     linear-gradient(135deg, rgba(255, 255, 255, .02), rgba(255, 255, 255, 0));
   box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
   cursor: pointer;
-  will-change: transform, opacity;
+  will-change: transform, opacity, filter;
   transition: opacity .18s ease, filter .18s ease, box-shadow .2s ease;
-  transform-origin: center center;
+  transform-origin: center 112%;
+  transform-style: preserve-3d;
   backface-visibility: hidden;
 }
 

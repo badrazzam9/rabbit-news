@@ -2,7 +2,7 @@
    R1 News Fetcher v26 — main.js
    ═══════════════════════════════════════════════ */
 
-const APP_VERSION = '76';
+const APP_VERSION = '77';
 const API_BASE = (localStorage.getItem('r1_api_base') || 'https://rabbit-news-worker.swordandscroll.workers.dev').replace(/\/$/, '');
 const BREAKING_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -17,16 +17,16 @@ const RECENT_ARTICLE_KEY = 'r1_recent_articles_v1';
 const ARTICLE_FONT_KEY = 'r1_article_font_scale_v1';
 const SEEN_ARTICLE_KEY = 'r1_seen_article_ids_v1';
 const SOURCE_HEALTH_KEY = 'r1_source_health_v1';
+const SHELL_VERSION_KEY = 'r1_shell_version';
 const SUPERSEDED_REQUEST_MESSAGE = 'Request replaced by a newer action.';
 const CARD_BATCH_SIZE = 20;
 const TAP_OPEN_MAX_DELTA = 12;
-const WHEEL_ANIMATION_EASE = 0.22;
-const WHEEL_ANIMATION_EPSILON = 0.003;
+const WHEEL_ANIMATION_DURATION_MS = 340;
 const WHEEL_CONFIG = {
   maxVisibleOffset: 2.8,
-  angleStep: 50,
-  radius: 110,
-  minScale: 0.42
+  angleStep: 60,
+  radius: 122,
+  minScale: 0.38
 };
 const LIVE_COVERAGE_TITLE_RE = /\b(live updates?|what to know|as it happened|live blog|minute by minute|watch live)\b/i;
 const LIVE_COVERAGE_URL_RE = /\/(?:live|live-updates?|blogs?)\/|\/live-updates(?:[-/]|$)|[?&]page=live\b/i;
@@ -234,6 +234,8 @@ const state = {
   breakingWheelPosition: 0,
   breakingWheelTarget: 0,
   breakingWheelFrame: 0,
+  breakingWheelAnimationStart: 0,
+  breakingWheelAnimationFrom: 0,
   requestControllers: new Map(),
   currentFeedContext: null,
   deckTouchStartY: 0,
@@ -244,6 +246,8 @@ const state = {
   cardWheelPosition: 0,
   cardWheelTarget: 0,
   cardWheelFrame: 0,
+  cardWheelAnimationStart: 0,
+  cardWheelAnimationFrom: 0,
   loadedCardCount: 0,
   seenArticleIds: new Set(),
   sourceHealth: {},
@@ -763,25 +767,34 @@ function goBackView() {
   if (state.view === 'cards') return setView('home');
 }
 
-function animateWheel(positionKey, targetKey, frameKey, render) {
+function easeOutCubic(value) {
+  return 1 - Math.pow(1 - value, 3);
+}
+
+function animateWheel(positionKey, targetKey, frameKey, startKey, fromKey, render) {
   if (state[frameKey]) {
-    return;
+    cancelAnimationFrame(state[frameKey]);
+    state[frameKey] = 0;
   }
+  state[startKey] = performance.now();
+  state[fromKey] = Number(state[positionKey]) || 0;
 
-  const step = () => {
-    const current = Number(state[positionKey]) || 0;
+  const step = (now) => {
+    const start = Number(state[startKey]) || now;
+    const from = Number(state[fromKey]) || 0;
     const target = Number(state[targetKey]) || 0;
-    const delta = target - current;
+    const progress = Math.min(1, (now - start) / WHEEL_ANIMATION_DURATION_MS);
+    const eased = easeOutCubic(progress);
+    state[positionKey] = from + ((target - from) * eased);
+    render();
 
-    if (Math.abs(delta) <= WHEEL_ANIMATION_EPSILON) {
+    if (progress >= 1) {
       state[positionKey] = target;
       state[frameKey] = 0;
       render();
       return;
     }
 
-    state[positionKey] = current + (delta * WHEEL_ANIMATION_EASE);
-    render();
     state[frameKey] = requestAnimationFrame(step);
   };
 
@@ -797,7 +810,7 @@ function scrollCards(direction) {
   if (nextIndex === state.activeCardIndex && state.cardWheelTarget === nextIndex) return;
   state.activeCardIndex = nextIndex;
   state.cardWheelTarget = nextIndex;
-  animateWheel('cardWheelPosition', 'cardWheelTarget', 'cardWheelFrame', applyWheelTransforms);
+  animateWheel('cardWheelPosition', 'cardWheelTarget', 'cardWheelFrame', 'cardWheelAnimationStart', 'cardWheelAnimationFrom', applyWheelTransforms);
 }
 
 function goHomeView() {
@@ -893,16 +906,17 @@ function applyWheelTransformsToNodes(cards, activePosition, { updateLoadMore = f
     const radius = WHEEL_CONFIG.radius;
     const radians = angle * Math.PI / 180;
     const cos = Math.cos(radians);
-    const y = Math.sin(radians) * radius;
-    const z = (cos - 1) * radius;
-    const scale = Math.max(WHEEL_CONFIG.minScale, cos);
-    const opacity = Math.max(0, cos * 1.12 - 0.12);
-    const blur = absOff === 0 ? 0 : absOff === 1 ? 0.08 : 0.18;
-    const shadowAlpha = absOff === 0 ? 0.5 : absOff === 1 ? 0.4 : 0.32;
+    const y = Math.sin(radians) * radius * 0.96;
+    const z = (cos - 1) * radius * 1.14;
+    const scale = Math.max(WHEEL_CONFIG.minScale, 0.18 + (cos * 0.82));
+    const opacity = Math.max(0, 0.04 + (cos * 1.08));
+    const blur = absOff === 0 ? 0 : absOff === 1 ? 0.18 : 0.38;
+    const shadowAlpha = absOff === 0 ? 0.54 : absOff === 1 ? 0.42 : 0.28;
+    const rotateY = offset * -4.5;
 
     card.style.cssText = `
       display: block;
-      transform: translateY(${y.toFixed(2)}px) translateZ(${z.toFixed(2)}px) rotateX(${(-angle).toFixed(2)}deg) scale(${scale.toFixed(3)});
+      transform: translateY(${y.toFixed(2)}px) translateZ(${z.toFixed(2)}px) rotateX(${(-angle).toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) scale(${scale.toFixed(3)});
       opacity: ${opacity.toFixed(3)};
       z-index: ${Math.round(100 - (absOff * 10))};
       pointer-events: ${i === focusedIndex ? 'auto' : 'none'};
@@ -934,7 +948,7 @@ function scrollBreaking(direction) {
   if (nextIndex === state.breakingIndex && state.breakingWheelTarget === nextIndex) return;
   state.breakingIndex = nextIndex;
   state.breakingWheelTarget = nextIndex;
-  animateWheel('breakingWheelPosition', 'breakingWheelTarget', 'breakingWheelFrame', applyBreakingWheelTransforms);
+  animateWheel('breakingWheelPosition', 'breakingWheelTarget', 'breakingWheelFrame', 'breakingWheelAnimationStart', 'breakingWheelAnimationFrom', applyBreakingWheelTransforms);
 }
 
 async function loadBreakingNewsInline() {
@@ -1762,9 +1776,36 @@ function registerSW() {
   }
 }
 
+async function enforceShellVersion() {
+  try {
+    const previous = localStorage.getItem(SHELL_VERSION_KEY);
+    if (!previous || previous === APP_VERSION) {
+      localStorage.setItem(SHELL_VERSION_KEY, APP_VERSION);
+      return false;
+    }
+
+    localStorage.setItem(SHELL_VERSION_KEY, APP_VERSION);
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((reg) => reg.unregister()));
+    }
+    if ('caches' in window) {
+      const names = await caches.keys();
+      await Promise.all(names.map((name) => caches.delete(name)));
+    }
+    location.reload();
+    return true;
+  } catch {
+    localStorage.setItem(SHELL_VERSION_KEY, APP_VERSION);
+    return false;
+  }
+}
+
 /* ═══ #17: Boot with error boundary ═══ */
 async function boot() {
   try {
+    const didReload = await enforceShellVersion();
+    if (didReload) return;
     bindUi();
     initR1Hardware();
     renderRegions();
