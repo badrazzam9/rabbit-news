@@ -1,10 +1,10 @@
-const VERSION = "65";
+const VERSION = "66";
 const SHELL_CACHE = `rabbit-news-shell-${VERSION}`;
 const SHELL_FILES = [
   "./",
   "./index.html",
-  "./main.js?v=65",
-  "./styles.css?v=65"
+  "./main.js?v=66",
+  "./styles.css?v=66"
 ];
 
 self.addEventListener("install", (event) => {

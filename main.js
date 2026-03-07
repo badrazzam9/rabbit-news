@@ -25,6 +25,8 @@ const WHEEL_CONFIG = {
   minScale: 0.32
 };
 const LIVE_COVERAGE_TITLE_RE = /\b(live updates?|what to know|as it happened|live blog|minute by minute|watch live)\b/i;
+const LIVE_COVERAGE_URL_RE = /\/(?:live|live-updates?|blogs?)\/|\/live-updates(?:[-/]|$)|[?&]page=live\b/i;
+const VIDEO_STORY_RE = /\/videos?\//i;
 const AGGREGATOR_HOST_PENALTIES = {
   'aol.com': 1.5,
   'msn.com': 1.8,
@@ -323,6 +325,31 @@ function scoreFreshCard(card) {
   return applySeenBoost(card, (card.publishedTs || 0) - livePenalty - sourcePenalty);
 }
 
+function isLiveCoverageCard(card) {
+  const normalizedCard = normalizeCard(card);
+  return (
+    LIVE_COVERAGE_TITLE_RE.test(normalizedCard.title || '') ||
+    LIVE_COVERAGE_TITLE_RE.test(normalizedCard.summary || '') ||
+    LIVE_COVERAGE_URL_RE.test(normalizedCard.url || '')
+  );
+}
+
+function isVideoStoryCard(card) {
+  const normalizedCard = normalizeCard(card);
+  return (
+    VIDEO_STORY_RE.test(normalizedCard.url || '') ||
+    /^watch:/i.test(normalizedCard.title || '')
+  );
+}
+
+function scoreBreakingCard(card) {
+  const normalizedCard = normalizeCard(card);
+  let score = scoreFreshCard(normalizedCard);
+  if (isLiveCoverageCard(normalizedCard)) score -= 24 * 60 * 60 * 1000;
+  if (isVideoStoryCard(normalizedCard)) score -= 6 * 60 * 60 * 1000;
+  return score;
+}
+
 function sortFreshCards(cards = [], { maxAgeHours = 96 } = {}) {
   const cutoff = Date.now() - (maxAgeHours * 60 * 60 * 1000);
   return cards
@@ -330,6 +357,24 @@ function sortFreshCards(cards = [], { maxAgeHours = 96 } = {}) {
     .filter((card) => card.url && !isPaywalled(card.url))
     .filter((card) => !card.publishedTs || card.publishedTs >= cutoff)
     .sort((left, right) => scoreFreshCard(right) - scoreFreshCard(left));
+}
+
+function sortBreakingCards(cards = [], { maxAgeHours = 96 } = {}) {
+  const cutoff = Date.now() - (maxAgeHours * 60 * 60 * 1000);
+  const normalized = cards
+    .map(normalizeCard)
+    .filter((card) => card.url && !isPaywalled(card.url))
+    .filter((card) => !card.publishedTs || card.publishedTs >= cutoff);
+
+  const standalone = normalized
+    .filter((card) => !isLiveCoverageCard(card))
+    .sort((left, right) => scoreBreakingCard(right) - scoreBreakingCard(left));
+
+  const liveCoverage = normalized
+    .filter((card) => isLiveCoverageCard(card))
+    .sort((left, right) => scoreBreakingCard(right) - scoreBreakingCard(left));
+
+  return dedupeCards([...standalone, ...liveCoverage]);
 }
 
 function scoreSearchCard(card, query) {
@@ -725,7 +770,7 @@ async function loadBreakingNewsInline() {
       return;
     }
 
-    const uniqueCards = sortFreshCards(dedupeCards(allCards)).slice(0, 24);
+    const uniqueCards = sortBreakingCards(dedupeCards(allCards)).slice(0, 24);
     state.breakingCards = uniqueCards;
     els.breakingDeck.innerHTML = '';
     state.breakingIndex = 0;
@@ -1402,7 +1447,7 @@ function initR1Hardware() {
 /* ═══ Service Worker registration & cache busting ═══ */
 function registerSW() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js?v=65').then(reg => {
+    navigator.serviceWorker.register('./sw.js?v=66').then(reg => {
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         newWorker.addEventListener('statechange', () => {
