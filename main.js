@@ -2,7 +2,7 @@
    R1 News Fetcher v26 — main.js
    ═══════════════════════════════════════════════ */
 
-const APP_VERSION = '74';
+const APP_VERSION = '75';
 const API_BASE = (localStorage.getItem('r1_api_base') || 'https://rabbit-news-worker.swordandscroll.workers.dev').replace(/\/$/, '');
 const BREAKING_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -21,14 +21,10 @@ const SUPERSEDED_REQUEST_MESSAGE = 'Request replaced by a newer action.';
 const CARD_BATCH_SIZE = 20;
 const TAP_OPEN_MAX_DELTA = 12;
 const WHEEL_CONFIG = {
-  maxVisibleOffset: 4,
-  angleStep: 24,
-  radius: 228,
-  minScale: 0.48,
-  depthMultiplier: 1.42,
-  tiltMultiplier: 1.18,
-  verticalCompression: 0.72,
-  sideFadeFloor: 0.18
+  maxVisibleOffset: 2,
+  angleStep: 56,
+  radius: 108,
+  minScale: 0.44
 };
 const LIVE_COVERAGE_TITLE_RE = /\b(live updates?|what to know|as it happened|live blog|minute by minute|watch live)\b/i;
 const LIVE_COVERAGE_URL_RE = /\/(?:live|live-updates?|blogs?)\/|\/live-updates(?:[-/]|$)|[?&]page=live\b/i;
@@ -858,23 +854,21 @@ function applyWheelTransformsToNodes(cards, active, { updateLoadMore = false, co
     const radius = WHEEL_CONFIG.radius;
     const radians = angle * Math.PI / 180;
     const cos = Math.cos(radians);
-    const y = Math.sin(radians) * radius * WHEEL_CONFIG.verticalCompression;
-    const z = (cos - 1) * radius * WHEEL_CONFIG.depthMultiplier;
-    const scale = Math.max(WHEEL_CONFIG.minScale, 0.56 + (cos * 0.44));
-    const opacity = Math.max(WHEEL_CONFIG.sideFadeFloor, 0.12 + ((cos + 1) * 0.44));
-    const blur = Math.min(0.45, absOff * 0.12);
-    const shadowAlpha = Math.max(0.12, 0.28 - (absOff * 0.035));
-    const rotateX = -angle * WHEEL_CONFIG.tiltMultiplier;
-    const rotateY = offset * 2.4;
+    const y = Math.sin(radians) * radius;
+    const z = (cos - 1) * radius;
+    const scale = Math.max(WHEEL_CONFIG.minScale, cos);
+    const opacity = Math.max(0, cos * 1.12 - 0.12);
+    const blur = absOff === 0 ? 0 : absOff === 1 ? 0.08 : 0.18;
+    const shadowAlpha = absOff === 0 ? 0.5 : absOff === 1 ? 0.4 : 0.32;
 
     card.style.cssText = `
       display: block;
-      transform: translateY(${y.toFixed(2)}px) translateZ(${z.toFixed(2)}px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) scale(${scale.toFixed(3)});
+      transform: translateY(${y.toFixed(2)}px) translateZ(${z.toFixed(2)}px) rotateX(${(-angle).toFixed(2)}deg) scale(${scale.toFixed(3)});
       opacity: ${opacity.toFixed(3)};
-      z-index: ${100 - absOff};
+      z-index: ${10 - absOff};
       pointer-events: ${absOff === 0 ? 'auto' : 'none'};
       filter: blur(${blur.toFixed(2)}px);
-      box-shadow: 0 ${14 + (absOff * 3)}px ${34 + (absOff * 4)}px rgba(0, 0, 0, ${shadowAlpha.toFixed(3)});
+      box-shadow: 0 ${10 + (absOff * 3)}px ${30 + (absOff * 4)}px rgba(0, 0, 0, ${shadowAlpha.toFixed(3)});
     `;
     card.classList.toggle('is-active', i === active);
   });
