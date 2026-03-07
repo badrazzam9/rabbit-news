@@ -2,7 +2,7 @@
    R1 News Fetcher v26 — main.js
    ═══════════════════════════════════════════════ */
 
-const APP_VERSION = '80';
+const APP_VERSION = '81';
 const API_BASE = (localStorage.getItem('r1_api_base') || 'https://rabbit-news-worker.swordandscroll.workers.dev').replace(/\/$/, '');
 const BREAKING_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -21,6 +21,7 @@ const SHELL_VERSION_KEY = 'r1_shell_version';
 const SUPERSEDED_REQUEST_MESSAGE = 'Request replaced by a newer action.';
 const CARD_BATCH_SIZE = 20;
 const TAP_OPEN_MAX_DELTA = 12;
+const WHEEL_ANIMATION_DURATION_MS = 1480;
 const WHEEL_CONFIG = {
   maxVisibleOffset: 2.2,
   angleStep: 55,
@@ -766,6 +767,11 @@ function goBackView() {
   if (state.view === 'cards') return setView('home');
 }
 
+function easeInOutCubic(value) {
+  if (value < 0.5) return 4 * value * value * value;
+  return 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
 function cancelWheelAnimation(frameKey) {
   if (state[frameKey]) {
     cancelAnimationFrame(state[frameKey]);
@@ -773,18 +779,44 @@ function cancelWheelAnimation(frameKey) {
   }
 }
 
+function animateWheel(positionKey, targetKey, frameKey, startKey, fromKey, render) {
+  cancelWheelAnimation(frameKey);
+  state[startKey] = performance.now();
+  state[fromKey] = Number(state[positionKey]) || 0;
+
+  const step = (now) => {
+    const start = Number(state[startKey]) || now;
+    const from = Number(state[fromKey]) || 0;
+    const target = Number(state[targetKey]) || 0;
+    const progress = Math.min(1, (now - start) / WHEEL_ANIMATION_DURATION_MS);
+    const eased = easeInOutCubic(progress);
+
+    state[positionKey] = from + ((target - from) * eased);
+    render();
+
+    if (progress >= 1) {
+      state[positionKey] = target;
+      state[frameKey] = 0;
+      render();
+      return;
+    }
+
+    state[frameKey] = requestAnimationFrame(step);
+  };
+
+  state[frameKey] = requestAnimationFrame(step);
+}
+
 function scrollCards(direction) {
   if (!state.cards.length) return;
-  if (direction > 0 && state.activeCardIndex >= state.loadedCardCount - 1 && state.loadedCardCount < state.cards.length) {
+  const currentIndex = Math.max(0, Math.min(state.loadedCardCount - 1, Math.round(state.cardWheelTarget)));
+  if (direction > 0 && currentIndex >= state.loadedCardCount - 1 && state.loadedCardCount < state.cards.length) {
     appendNextCardBatch();
   }
-  const nextIndex = Math.max(0, Math.min(state.loadedCardCount - 1, state.activeCardIndex + direction));
-  if (nextIndex === state.activeCardIndex && state.cardWheelTarget === nextIndex) return;
-  state.activeCardIndex = nextIndex;
-  state.cardWheelPosition = nextIndex;
+  const nextIndex = Math.max(0, Math.min(state.loadedCardCount - 1, currentIndex + direction));
+  if (nextIndex === state.cardWheelTarget) return;
   state.cardWheelTarget = nextIndex;
-  cancelWheelAnimation('cardWheelFrame');
-  applyWheelTransforms();
+  animateWheel('cardWheelPosition', 'cardWheelTarget', 'cardWheelFrame', 'cardWheelAnimationStart', 'cardWheelAnimationFrom', applyWheelTransforms);
 }
 
 function goHomeView() {
@@ -860,12 +892,14 @@ function createBreakingCardElement(card, index) {
   return createCardElement(card, index, { placeholderLabel: 'Breaking', includeSummary: true });
 }
 
-function applyWheelTransformsToNodes(cards, activePosition, { updateLoadMore = false, counterId = null, activeIndex = null } = {}) {
+function applyWheelTransformsToNodes(cards, activePosition, { updateLoadMore = false, counterId = null } = {}) {
   if (!cards.length) return;
-  if (updateLoadMore) updateLoadMoreHint();
-
-  const focusedIndex = Math.max(0, Math.min(cards.length - 1, activeIndex ?? Math.round(activePosition)));
-  const counterIndex = activeIndex ?? focusedIndex;
+  const focusedIndex = Math.max(0, Math.min(cards.length - 1, Math.round(activePosition)));
+  if (updateLoadMore) {
+    state.activeCardIndex = focusedIndex;
+    updateLoadMoreHint();
+  }
+  const counterIndex = focusedIndex;
 
   cards.forEach((card, i) => {
     const offset = i - activePosition;
@@ -904,27 +938,26 @@ function applyWheelTransformsToNodes(cards, activePosition, { updateLoadMore = f
     const counter = document.getElementById(counterId);
     if (counter) counter.textContent = `${counterIndex + 1} / ${cards.length}`;
   }
+
+  return focusedIndex;
 }
 
 function applyBreakingWheelTransforms() {
   const cards = [...els.breakingDeck.querySelectorAll('.news-card')];
   if (!cards.length) return;
 
-  applyWheelTransformsToNodes(cards, state.breakingWheelPosition, {
-    counterId: 'breakCounter',
-    activeIndex: state.breakingIndex
+  state.breakingIndex = applyWheelTransformsToNodes(cards, state.breakingWheelPosition, {
+    counterId: 'breakCounter'
   });
 }
 
 function scrollBreaking(direction) {
   if (!state.breakingCards.length) return;
-  const nextIndex = Math.max(0, Math.min(state.breakingCards.length - 1, state.breakingIndex + direction));
-  if (nextIndex === state.breakingIndex && state.breakingWheelTarget === nextIndex) return;
-  state.breakingIndex = nextIndex;
-  state.breakingWheelPosition = nextIndex;
+  const currentIndex = Math.max(0, Math.min(state.breakingCards.length - 1, Math.round(state.breakingWheelTarget)));
+  const nextIndex = Math.max(0, Math.min(state.breakingCards.length - 1, currentIndex + direction));
+  if (nextIndex === state.breakingWheelTarget) return;
   state.breakingWheelTarget = nextIndex;
-  cancelWheelAnimation('breakingWheelFrame');
-  applyBreakingWheelTransforms();
+  animateWheel('breakingWheelPosition', 'breakingWheelTarget', 'breakingWheelFrame', 'breakingWheelAnimationStart', 'breakingWheelAnimationFrom', applyBreakingWheelTransforms);
 }
 
 async function loadBreakingNewsInline() {
@@ -1106,13 +1139,11 @@ function createCardElement(card, index, {
 function applyWheelTransforms() {
   const cards = [...els.deck.querySelectorAll('.news-card')];
   if (!cards.length) return;
-  applyWheelTransformsToNodes(cards, state.cardWheelPosition, {
-    updateLoadMore: true,
-    activeIndex: state.activeCardIndex
+  const focusedIndex = applyWheelTransformsToNodes(cards, state.cardWheelPosition, {
+    updateLoadMore: true
   });
-
-  // Card counter
-  els.cardCounter.textContent = `${state.activeCardIndex + 1} / ${state.cards.length}`;
+  state.activeCardIndex = focusedIndex;
+  els.cardCounter.textContent = `${focusedIndex + 1} / ${state.cards.length}`;
 }
 
 function refreshActiveCard() {

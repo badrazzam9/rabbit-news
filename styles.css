@@ -396,7 +396,7 @@ input {
   box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
   cursor: pointer;
   will-change: transform, opacity, filter;
-  transition: transform 1.24s cubic-bezier(.12, .82, .16, 1), opacity .48s ease, filter .48s ease, box-shadow .56s ease, border-color .48s ease;
+  transition: border-color .24s ease;
   transform-origin: center center;
   transform-style: preserve-3d;
   backface-visibility: hidden;
